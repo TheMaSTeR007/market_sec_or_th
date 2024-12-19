@@ -1,3 +1,5 @@
+import subprocess
+
 from scrapy.cmdline import execute
 from lxml.html import fromstring
 from datetime import datetime
@@ -22,17 +24,17 @@ def df_cleaner(data_frame: pd.DataFrame) -> pd.DataFrame:
 
     # Apply the function to all columns for Cleaning
     for column in data_frame.columns:
-        data_frame[column] = data_frame[column].apply(set_date_format)  # Set the Date format
+        data_frame[column] = data_frame[column].apply(remove_extra_spaces)  # Remove extra spaces and newline characters from each column
         data_frame[column] = data_frame[column].apply(set_na)  # Setting "N/A" where data is "No Information" or some empty string characters on site
-        # data_frame[column] = data_frame[column].apply(remove_extra_spaces)  # Remove extra spaces and newline characters from each column
-        # """Cannot remove punctuations from 'name' header because website urls are also coming in 'name'"""
-        # if 'name' in column:
-        # data_frame[column] = data_frame[column].str.replace('–', '')  # Remove specific punctuation 'dash' from name string
-        # data_frame[column] = data_frame[column].apply(remove_extra_spaces)  # Remove extra spaces and newline characters from each column
-        # data_frame[column] = data_frame[column].str.translate(str.maketrans('', '', string.punctuation))  # Removing Punctuation from name text
+        if 'date' in column:
+            data_frame[column] = data_frame[column].apply(set_date_format)  # Set the Date format
+        if 'name' in column:
+            data_frame[column] = data_frame[column].apply(remove_diacritics)  # Remove diacritics characters
+            data_frame[column] = data_frame[column].apply(remove_extra_spaces)  # Remove extra spaces and newline characters from each column
+            """Cannot remove punctuations from 'name' header because website urls are also coming in 'name'"""
+            # data_frame[column] = data_frame[column].apply(remove_punctuation)  # Remove extra spaces and newline characters from each column
         if 'alias' in column:
             data_frame[column] = data_frame[column].apply(remove_diacritics)  # Remove diacritics characters
-            # data_frame[column] = data_frame[column].str.translate(str.maketrans('', '', string.punctuation))  # Removing Punctuation from name text
             data_frame[column] = data_frame[column].apply(remove_punctuation)  # Removing Punctuation from name text
         data_frame[column] = data_frame[column].apply(remove_extra_spaces)  # Remove extra spaces and newline characters from each column
     data_frame.replace(to_replace='nan', value=pd.NA, inplace=True)  # After cleaning, replace 'nan' strings back with actual NaN values
@@ -42,29 +44,12 @@ def df_cleaner(data_frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def remove_diacritics(input_str):
-    return ''.join(char for char in unicodedata.normalize('NFD', input_str) if not unicodedata.combining(char))
+    return input_str if input_str == 'N/A' else ''.join(char for char in unicodedata.normalize('NFD', input_str) if not unicodedata.combining(char))
 
-
-# def remove_link_text(text: str) -> str:  # Remove Link Click Text from text
-#     text = text.replace('Clique aqui para saber mais sobre essa empresa', '')  # Click here to learn more about this company
-#     text = text.replace('Clique aqui para saber mais sobre a pessoa', '')  # Click here to learn more about the person
-#     return text.strip()
-
-
-# def set_na(text: str) -> str:
-#     text = remove_extra_spaces(text=text)
-#     if text.title() == 'Sem Informação' or text == '**' or text == '.':
-#         text = text.replace('Sem Informação', 'N/A')  # Setting "N/A" where data is "No Information" on site
-#         text = text.replace('**', 'N/A')  # Setting "N/A" where data is "**" on site
-#         return text
-#     return text
 
 # Function to remove all punctuation
 def remove_punctuation(text):
-    if text != 'N/A':
-        return ''.join(char for char in text if not unicodedata.category(char).startswith('P'))
-    else:
-        return text
+    return text if text == 'N/A' else ''.join(char for char in text if not unicodedata.category(char).startswith('P'))
 
 
 def set_na(text: str) -> str:
@@ -84,7 +69,7 @@ def set_date_format(text: str) -> str:
         date_str = match.group(1)  # Extract the date part from the match
         try:
             date_object = datetime.strptime(date_str, "%d/%m/%Y")  # Try converting the extracted date to a datetime object
-            return date_object.strftime("%Y/%m/%d")  # Format the date object to 'YYYY/MM/DD' & return Date string
+            return date_object.strftime("%Y-%m-%d")  # Format the date object to 'YYYY/MM/DD' & return Date string
         except ValueError:
             return text  # If the date is invalid, return the original text
     else:
@@ -97,8 +82,7 @@ def remove_extra_spaces(text: str) -> str:
 
 
 def header_cleaner(header_text: str) -> str:
-    header_text = header_text.strip()
-    header = remove_diacritics('_'.join(header_text.lower().split()))
+    header = remove_diacritics('_'.join(header_text.strip().lower().split()))
     return header
 
 
@@ -134,7 +118,8 @@ class MarketSecThailandSpider(scrapy.Spider):
         # Path to store the Excel file can be customized by the user
         self.excel_path = r"../Excel_Files"  # Client can customize their Excel file path here (default: govtsites > govtsites > Excel_Files)
         os.makedirs(self.excel_path, exist_ok=True)  # Create Folder if not exists
-        self.filename = fr"{self.excel_path}/{self.name}.xlsx"  # Filename with Scrape Date
+        self.filename_native = fr"{self.excel_path}/{self.name}_native.xlsx"  # Filename with Scrape Date
+        self.filename_translated = fr"{self.excel_path}/{self.name}_translated.xlsx"  # Filename with Scrape Date
 
     def start_requests(self) -> Iterable[Request]:
         cookies = {
@@ -194,6 +179,8 @@ class MarketSecThailandSpider(scrapy.Spider):
                                 field_name = header_cleaner(key_value[0].strip())
                                 # field_value = format_multiple_values(key_value[1].strip())  # Handle multiple values by separating with ` | `
                                 field_value = key_value[1].strip()  # Handle multiple values by separating with ` | `
+                                if 'website' in field_name:
+                                    field_value = ' | '.join(field_value.strip(',').strip().split(','))
                                 data_dict[field_name] = field_value
 
                         # Extract image URL
@@ -222,17 +209,27 @@ class MarketSecThailandSpider(scrapy.Spider):
         print("Converting List of Dictionaries into DataFrame, then into Excel file...")
         try:
             print("Creating Native sheet...")
-            data_df = pd.DataFrame(self.final_data_list)
-            data_df = df_cleaner(data_frame=data_df)  # Apply the function to all columns for Cleaning
-            data_df.insert(loc=0, column='id', value=range(1, len(data_df) + 1))  # Add 'id' column at position 1
-            with pd.ExcelWriter(path=self.filename, engine='xlsxwriter', engine_kwargs={"options": {'strings_to_urls': False}}) as writer:
-                data_df.to_excel(excel_writer=writer, index=False)
+            native_data_df = pd.DataFrame(self.final_data_list)
+            native_data_df = df_cleaner(data_frame=native_data_df)  # Apply the function to all columns for Cleaning
+            native_data_df.insert(loc=0, column='id', value=range(1, len(native_data_df) + 1))  # Add 'id' column at position 1
+            with pd.ExcelWriter(path=self.filename_native, engine='xlsxwriter', engine_kwargs={"options": {'strings_to_urls': False}}) as writer:
+                native_data_df.to_excel(excel_writer=writer, index=False)
             print("Native Excel file Successfully created.")
         except Exception as e:
             print('Error while Generating Native Excel file:', e)
+
+        # Run the translation script with filenames passed as arguments
+        try:
+            subprocess.run(
+                args=["python", "translate_and_save.py", self.filename_native, self.filename_translated],  # Define the filenames as arguments
+                check=True
+            )
+            print("Translation completed successfully.")
+        except subprocess.CalledProcessError as e:
+            print(f"Error during translation: {e}")
         if self.api.is_connected:  # Disconnecting VPN if it's still connected
             self.api.disconnect()
-
+            print('VPN Connected!' if self.api.is_connected else 'VPN Disconnected!')
         end = time.time()
         print(f'Scraping done in {end - self.start} seconds.')
 
