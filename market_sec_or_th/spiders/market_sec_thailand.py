@@ -32,7 +32,7 @@ def df_cleaner(data_frame: pd.DataFrame) -> pd.DataFrame:
             data_frame[column] = data_frame[column].apply(remove_diacritics)  # Remove diacritics characters
             data_frame[column] = data_frame[column].apply(remove_extra_spaces)  # Remove extra spaces and newline characters from each column
             """Cannot remove punctuations from 'name' header because website urls are also coming in 'name'"""
-            # data_frame[column] = data_frame[column].apply(remove_punctuation)  # Remove extra spaces and newline characters from each column
+            data_frame[column] = data_frame[column].apply(remove_punctuation)  # Remove extra spaces and newline characters from each column
         if 'alias' in column:
             data_frame[column] = data_frame[column].apply(remove_diacritics)  # Remove diacritics characters
             data_frame[column] = data_frame[column].apply(remove_punctuation)  # Removing Punctuation from name text
@@ -47,9 +47,40 @@ def remove_diacritics(input_str):
     return input_str if input_str == 'N/A' else ''.join(char for char in unicodedata.normalize('NFD', input_str) if not unicodedata.combining(char))
 
 
+# # Function to remove all punctuation
+# def remove_punctuation(text):
+#     return text if text == 'N/A' else ''.join(char for char in text if not unicodedata.category(char).startswith('P'))
+
+
 # Function to remove all punctuation
+import re
+import unicodedata
+
+
 def remove_punctuation(text):
-    return text if text == 'N/A' else ''.join(char for char in text if not unicodedata.category(char).startswith('P'))
+    if text == 'N/A':
+        return text
+
+    # Regex pattern to match URLs (http, https, or www) and exclude trailing punctuation
+    url_pattern = r'(https?://[^\s,]+|www\.[^\s,]+)'
+
+    # Find all URLs in the text
+    urls = re.findall(url_pattern, text)
+
+    # Replace URLs with placeholders
+    placeholder = "siteURL"
+    text_with_placeholders = re.sub(url_pattern, placeholder, text)
+
+    # Remove punctuation from the non-URL parts
+    text_without_punctuation = ''.join(
+        char for char in text_with_placeholders if not unicodedata.category(char).startswith('P')
+    )
+
+    # Restore the URLs from placeholders
+    for url in urls:
+        text_without_punctuation = text_without_punctuation.replace(placeholder, url, 1)
+
+    return text_without_punctuation
 
 
 def set_na(text: str) -> str:
@@ -190,46 +221,52 @@ class MarketSecThailandSpider(scrapy.Spider):
                     value = ' | '.join(value.xpath('.//text()')).strip()
                     if header.lower() == "name":
                         # Extract alias and clean the 'name' using regex
-                        # alias_pattern = r"(impersonates?|impersonate) (.+?)(?:,|$)"  # Regex for finding alias strings after 'impersonates' or 'impersonate'
+                        # alias_pattern = r"(impersonates?|impersonate)\s*(.+?)(?:$)"  # Regex for finding alias strings after 'impersonates' or 'impersonate'
+                        # aliases = re.findall(alias_pattern, value)
+                        # alias_values = " | ".join(alias[1].strip() for alias in aliases)
+
+                        # Updated regex to handle impersonates followed by multi-line alias
                         alias_pattern = r"(impersonates?|impersonate)\s*(.+?)(?:$)"  # Regex for finding alias strings after 'impersonates' or 'impersonate'
-                        aliases = re.findall(alias_pattern, value)
-                        alias_values = " | ".join(alias[1].strip() for alias in aliases)
+                        aliases = re.findall(alias_pattern, value, flags=re.DOTALL)  # Use re.DOTALL to allow '.' to match newlines
+                        alias_values = " | ".join(alias[1].strip().strip('“”') for alias in aliases)  # Strip and join all alias values found (remove leading/trailing whitespace, smart quotes)
                         data_dict["alias"] = alias_values if alias_values else "N/A"
                         value = re.sub(pattern=alias_pattern, repl="", string=value).strip()  # Remove alias-related text from 'name'
 
                     data_dict[header] = value if value != '' else 'N/A'
 
-            print(data_dict)
+            # print(data_dict)
             self.final_data_list.append(data_dict)
 
         print('+' * 100)
 
     def close(self, reason):
         print('closing spider...')
-        print("Converting List of Dictionaries into DataFrame, then into Excel file...")
-        try:
-            print("Creating Native sheet...")
-            native_data_df = pd.DataFrame(self.final_data_list)
-            native_data_df = df_cleaner(data_frame=native_data_df)  # Apply the function to all columns for Cleaning
-            native_data_df.insert(loc=0, column='id', value=range(1, len(native_data_df) + 1))  # Add 'id' column at position 1
-            with pd.ExcelWriter(path=self.filename_native, engine='xlsxwriter', engine_kwargs={"options": {'strings_to_urls': False}}) as writer:
-                native_data_df.to_excel(excel_writer=writer, index=False)
-            print("Native Excel file Successfully created.")
-        except Exception as e:
-            print('Error while Generating Native Excel file:', e)
+        if self.final_data_list:
+            try:
+                print("Creating Native sheet...")
+                native_data_df = pd.DataFrame(self.final_data_list)
+                native_data_df = df_cleaner(data_frame=native_data_df)  # Apply the function to all columns for Cleaning
+                native_data_df.insert(loc=0, column='id', value=range(1, len(native_data_df) + 1))  # Add 'id' column at position 1
+                with pd.ExcelWriter(path=self.filename_native, engine='xlsxwriter', engine_kwargs={"options": {'strings_to_urls': False}}) as writer:
+                    native_data_df.to_excel(excel_writer=writer, index=False)
+                print("Native Excel file Successfully created.")
+            except Exception as e:
+                print('Error while Generating Native Excel file:', e)
 
-        # Run the translation script with filenames passed as arguments
-        try:
-            subprocess.run(
-                args=["python", "translate_and_save.py", self.filename_native, self.filename_translated],  # Define the filenames as arguments
-                check=True
-            )
-            print("Translation completed successfully.")
-        except subprocess.CalledProcessError as e:
-            print(f"Error during translation: {e}")
+            # Run the translation script with filenames passed as arguments
+            try:
+                # Define the filenames as arguments with source language code
+                subprocess.run(
+                    args=["python", "translate_and_save.py", self.filename_native, self.filename_translated, 'th'],
+                    check=True
+                )
+                print("Translation completed successfully.")
+            except subprocess.CalledProcessError as e:
+                print(f"Error during translation: {e}")
+        else:
+            print('Final-Data-List is empty.')
         if self.api.is_connected:  # Disconnecting VPN if it's still connected
             self.api.disconnect()
-            print('VPN Connected!' if self.api.is_connected else 'VPN Disconnected!')
         end = time.time()
         print(f'Scraping done in {end - self.start} seconds.')
 
