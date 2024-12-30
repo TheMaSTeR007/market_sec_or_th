@@ -1,0 +1,10 @@
+# Core dependencies
+scrapy  # Web scraping framework
+pandas  # Data manipulation and analysis
+
+# Additional modules
+lxml  # For parsing HTML and XML
+evpn  # VPN handling (if evpn is a valid library you are using)
+
+# Use below command to install above modules
+# pip install -r market_sec_thailand_requirements.txt

@@ -1,5 +1,3 @@
-import subprocess
-
 from scrapy.cmdline import execute
 from lxml.html import fromstring
 from datetime import datetime
@@ -7,10 +5,9 @@ from typing import Iterable
 from scrapy import Request
 import pandas as pd
 import unicodedata
+import subprocess
 import random
-import string
 import scrapy
-import json
 import time
 import evpn
 import os
@@ -50,11 +47,6 @@ def remove_diacritics(input_str):
 # # Function to remove all punctuation
 # def remove_punctuation(text):
 #     return text if text == 'N/A' else ''.join(char for char in text if not unicodedata.category(char).startswith('P'))
-
-
-# Function to remove all punctuation
-import re
-import unicodedata
 
 
 def remove_punctuation(text):
@@ -267,6 +259,7 @@ class MarketSecThailandSpider(scrapy.Spider):
             print('Final-Data-List is empty.')
         if self.api.is_connected:  # Disconnecting VPN if it's still connected
             self.api.disconnect()
+            print('VPN Disconnected' if self.api.is_connected else 'VPN not Disconnected')
         end = time.time()
         print(f'Scraping done in {end - self.start} seconds.')
 
